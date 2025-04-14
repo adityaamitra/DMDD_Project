@@ -243,13 +243,16 @@ CREATE   TABLE USER_ADDRESS
      CITY           VARCHAR2 (100)  NOT NULL , 
      STATE          VARCHAR2 (100)  NOT NULL , 
      COUNTRY        VARCHAR2 (100)  NOT NULL , 
-     ZIP_CODE       NUMBER  NOT NULL , 
-     ADDRESS_TYPE   VARCHAR2 (10)  NOT NULL 
+<<<<<<< HEAD
+     ZIP_CODE       NUMBER  NOT NULL 
+=======
+     ZIP_CODE       NUMBER  NOT NULL  
+>>>>>>> main
+     
     ) 
 ;
 
-COMMENT ON COLUMN USER_ADDRESS.ADDRESS_TYPE IS 'Ex. Home, Office, etc' 
-;
+
 
 ALTER TABLE USER_ADDRESS 
     ADD CONSTRAINT USER_ADDRESS_PK PRIMARY KEY ( ADDRESS_ID ) ;
@@ -481,5 +484,26 @@ ADD CONSTRAINT chk_venue_name_not_blank CHECK (TRIM(VENUE_NAME) IS NOT NULL AND 
 ALTER TABLE SPONSOR
 ADD CONSTRAINT chk_sponsor_amount_positive CHECK (AMOUNT_SPONSORED > 0);
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> main
+ALTER TABLE EVENT_USERS
+ADD CONSTRAINT unique_email UNIQUE (EMAIL);
+
+ALTER TABLE EVENT_USERS
+ADD CONSTRAINT unique_phone_number UNIQUE (PHONE_NUMBER);
+
+ALTER TABLE USER_ADDRESS
+ADD CONSTRAINT unique_user_address UNIQUE (USER_USER_ID);
+
+<<<<<<< HEAD
+
+
+
+
+Commit;
+=======
 Commit;
 
+>>>>>>> main
