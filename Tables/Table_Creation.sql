@@ -243,7 +243,11 @@ CREATE   TABLE USER_ADDRESS
      CITY           VARCHAR2 (100)  NOT NULL , 
      STATE          VARCHAR2 (100)  NOT NULL , 
      COUNTRY        VARCHAR2 (100)  NOT NULL , 
+<<<<<<< HEAD
      ZIP_CODE       NUMBER  NOT NULL 
+=======
+     ZIP_CODE       NUMBER  NOT NULL  
+>>>>>>> main
      
     ) 
 ;
@@ -480,6 +484,10 @@ ADD CONSTRAINT chk_venue_name_not_blank CHECK (TRIM(VENUE_NAME) IS NOT NULL AND 
 ALTER TABLE SPONSOR
 ADD CONSTRAINT chk_sponsor_amount_positive CHECK (AMOUNT_SPONSORED > 0);
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> main
 ALTER TABLE EVENT_USERS
 ADD CONSTRAINT unique_email UNIQUE (EMAIL);
 
@@ -489,8 +497,13 @@ ADD CONSTRAINT unique_phone_number UNIQUE (PHONE_NUMBER);
 ALTER TABLE USER_ADDRESS
 ADD CONSTRAINT unique_user_address UNIQUE (USER_USER_ID);
 
+<<<<<<< HEAD
 
 
 
 
 Commit;
+=======
+Commit;
+
+>>>>>>> main
