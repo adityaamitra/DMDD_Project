@@ -243,13 +243,9 @@ CREATE   TABLE USER_ADDRESS
      CITY           VARCHAR2 (100)  NOT NULL , 
      STATE          VARCHAR2 (100)  NOT NULL , 
      COUNTRY        VARCHAR2 (100)  NOT NULL , 
-<<<<<<< HEAD
      ZIP_CODE       NUMBER  NOT NULL 
-=======
-     ZIP_CODE       NUMBER  NOT NULL  
->>>>>>> main
-     
-    ) 
+    
+) 
 ;
 
 
