@@ -54,7 +54,7 @@ EXCEPTION
 END add_user_address;
 /
 
--- Procedure for user creation that calls the address procedure
+-- Procedure for user creation with extended parameters
 CREATE OR REPLACE PROCEDURE add_user_with_address(
     p_first_name IN VARCHAR2,
     p_last_name IN VARCHAR2,
@@ -66,18 +66,42 @@ CREATE OR REPLACE PROCEDURE add_user_with_address(
     p_city IN VARCHAR2,
     p_state IN VARCHAR2,
     p_country IN VARCHAR2,
-    p_zip_code IN NUMBER
+    p_zip_code IN NUMBER,
+    -- Additional parameters for type-specific tables
+    p_company_name IN VARCHAR2 DEFAULT NULL,
+    p_sponsor_name IN VARCHAR2 DEFAULT NULL,
+    p_amount_sponsored IN NUMBER DEFAULT NULL,
+    p_venue_name IN VARCHAR2 DEFAULT NULL,
+    p_venue_capacity IN NUMBER DEFAULT NULL
 )
 AS
     v_user_id NUMBER;
     invalid_user_type EXCEPTION;
     email_exists EXCEPTION;
     phone_exists EXCEPTION;
+    invalid_contact EXCEPTION;
+    missing_required_info EXCEPTION;
     v_count NUMBER;
+    v_is_valid NUMBER;
 BEGIN
+    -- Validate contact information using the validate_user_contact function
+    v_is_valid := validate_user_contact(p_phone_number, p_email);
+    IF v_is_valid = 0 THEN
+        RAISE invalid_contact;
+    END IF;
+    
     -- Validate user_type
     IF p_user_type NOT IN ('Attendee', 'Organizer', 'Sponsor', 'Venue_Manager') THEN
         RAISE invalid_user_type;
+    END IF;
+    
+    -- Check for required type-specific information
+    IF p_user_type = 'Organizer' AND p_company_name IS NULL THEN
+        RAISE missing_required_info;
+    ELSIF p_user_type = 'Sponsor' AND p_sponsor_name IS NULL THEN
+        RAISE missing_required_info;
+    ELSIF p_user_type = 'Venue_Manager' AND (p_venue_name IS NULL OR p_venue_capacity IS NULL) THEN
+        RAISE missing_required_info;
     END IF;
     
     -- Check if email already exists
@@ -92,10 +116,68 @@ BEGIN
         RAISE phone_exists;
     END IF;
     
+    -- Disable the trigger temporarily to handle the insert ourselves
+    EXECUTE IMMEDIATE 'ALTER TRIGGER after_insert_event_users DISABLE';
+    
     -- Insert into USER table
     INSERT INTO EVENT_USERS(USER_ID, FIRST_NAME, LAST_NAME, EMAIL, PHONE_NUMBER, USER_PASSWORD, USER_TYPE)
     VALUES (USER_ID_SEQ.NEXTVAL, p_first_name, p_last_name, p_email, p_phone_number, p_user_password, p_user_type)
     RETURNING USER_ID INTO v_user_id;
+    
+    -- Insert into type-specific table based on user_type
+    CASE p_user_type
+        WHEN 'Attendee' THEN
+            INSERT INTO ATTENDEE (
+                ATTENDEE_ID,
+                FIRST_NAME,
+                LAST_NAME,
+                USER_USER_ID
+            ) VALUES (
+                ATTENDEE_ID_SEQ.NEXTVAL,
+                p_first_name,
+                p_last_name,
+                v_user_id
+            );
+            
+        WHEN 'Organizer' THEN
+            INSERT INTO ORGANIZER (
+                ORGANIZER_ID,
+                USER_USER_ID,
+                COMPANY_NAME
+            ) VALUES (
+                ORGANIZER_ID_SEQ.NEXTVAL,
+                v_user_id,
+                p_company_name
+            );
+            
+        WHEN 'Sponsor' THEN
+            INSERT INTO SPONSOR (
+                SPONSOR_ID,
+                SPONSOR_NAME,
+                AMOUNT_SPONSORED,
+                EVENT_EVENT_ID,
+                USER_USER_ID
+            ) VALUES (
+                SPONSOR_ID_SEQ.NEXTVAL,
+                p_sponsor_name,
+                NVL(p_amount_sponsored, 0),
+                NULL,  -- EVENT_EVENT_ID to be updated later
+                v_user_id
+            );
+            
+        WHEN 'Venue_Manager' THEN
+            INSERT INTO VENUE (
+                VENUE_ID,
+                VENUE_NAME,
+                VENUE_CAPACITY,
+                USER_USER_ID
+            ) VALUES (
+                VENUE_ID_SEQ.NEXTVAL,
+                p_venue_name,
+                p_venue_capacity,
+                v_user_id
+            );
+    END CASE;
     
     -- Call the address procedure with the newly generated user_id
     add_user_address(
@@ -107,12 +189,23 @@ BEGIN
         p_zip_code
     );
     
-    -- Commit the transaction after both operations are complete
+    -- Re-enable the trigger
+    EXECUTE IMMEDIATE 'ALTER TRIGGER after_insert_event_users ENABLE';
+    
+    -- Commit the transaction after all operations are complete
     COMMIT;
     
+    DBMS_OUTPUT.PUT_LINE('User created successfully with ID: ' || v_user_id);
+    
 EXCEPTION
+    WHEN invalid_contact THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Invalid phone number or email format');
+        ROLLBACK;
     WHEN invalid_user_type THEN
         DBMS_OUTPUT.PUT_LINE('Error: USER_TYPE must be Attendee, Organizer, Sponsor, or Venue_Manager');
+        ROLLBACK;
+    WHEN missing_required_info THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Missing required information for user type ' || p_user_type);
         ROLLBACK;
     WHEN email_exists THEN
         DBMS_OUTPUT.PUT_LINE('Error: User with email ' || p_email || ' already exists');
@@ -121,10 +214,10 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE('Error: User with phone number ' || p_phone_number || ' already exists');
         ROLLBACK;
     WHEN OTHERS THEN
-        -- Rollback in case of any errors
+        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        -- Make sure to re-enable the trigger even if there's an error
+        EXECUTE IMMEDIATE 'ALTER TRIGGER after_insert_event_users ENABLE';
         ROLLBACK;
-        -- Raise the error to the caller
-        RAISE;
 END add_user_with_address;
 /
 
@@ -144,9 +237,11 @@ AS
     phone_exists EXCEPTION;
     invalid_user_type EXCEPTION;
     user_not_found EXCEPTION;
+    invalid_contact EXCEPTION;
     v_current_email VARCHAR2(250);
     v_current_phone NUMBER;
     v_current_type VARCHAR2(15);
+    v_is_valid NUMBER;
 BEGIN
     -- Check if user exists
     SELECT COUNT(*) INTO v_count FROM EVENT_USERS WHERE USER_ID = p_user_id;
@@ -159,6 +254,18 @@ BEGIN
     INTO v_current_email, v_current_phone, v_current_type
     FROM EVENT_USERS
     WHERE USER_ID = p_user_id;
+    
+    -- Validate contact information if either is being updated
+    IF p_email IS NOT NULL OR p_phone_number IS NOT NULL THEN
+        v_is_valid := validate_user_contact(
+            CASE WHEN p_phone_number IS NOT NULL THEN p_phone_number ELSE v_current_phone END,
+            CASE WHEN p_email IS NOT NULL THEN p_email ELSE v_current_email END
+        );
+        
+        IF v_is_valid = 0 THEN
+            RAISE invalid_contact;
+        END IF;
+    END IF;
     
     -- Check if new email exists (if it's being updated)
     IF p_email IS NOT NULL AND p_email != v_current_email THEN
@@ -201,6 +308,9 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('User with ID ' || p_user_id || ' updated successfully.');
     
 EXCEPTION
+    WHEN invalid_contact THEN
+        DBMS_OUTPUT.PUT_LINE('Error: Invalid phone number or email format');
+        ROLLBACK;
     WHEN user_not_found THEN
         DBMS_OUTPUT.PUT_LINE('Error: User with ID ' || p_user_id || ' not found.');
         ROLLBACK;
@@ -286,281 +396,458 @@ END update_user_address;
 /
 
 -- Test cases for checking if the procedures work correctly
-
--- Test Case 1: Valid user creation with address
+-- Test Case 1: User creation - Valid inputs
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 1: Valid user creation with address');
+    DBMS_OUTPUT.PUT_LINE('Test Case 1: User creation with valid inputs');
     add_user_with_address(
-        'John',                  -- First name
-        'Doe',                   -- Last name
-        'john.doe@example.com',  -- Email
-        1234567890,              -- Phone number
-        'Password123',           -- Password
-        'Attendee',              -- User type (valid)
-        '123 Main St',           -- Street address
-        'New York',              -- City
-        'NY',                    -- State
-        'USA',                   -- Country
-        10001                    -- Zip code
+        'John', 'Doe', 'john.doe@example.com', 1234567890, 'Password123', 'Attendee',
+        '123 Main St', 'New York', 'NY', 'USA', 10001
     );
-    DBMS_OUTPUT.PUT_LINE('Test Case 1: Successfully created user and address');
-EXCEPTION
-    WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Test Case 1 Error: ' || SQLERRM);
 END;
 /
 
--- Test Case 2: Test invalid user type
+-- Test Case 2: User creation - Invalid phone (9 digits)
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 2: Testing invalid user type');
-    
+    DBMS_OUTPUT.PUT_LINE('Test Case 2: User creation with invalid phone (9 digits)');
     add_user_with_address(
-        'Jane',                  -- First name
-        'Smith',                 -- Last name
-        'jane.smith@example.com',-- Email
-        9876543210,              -- Phone number
-        'Password456',           -- Password
-        'Invalid_Type',          -- User type (invalid)
-        '456 Oak Ave',           -- Street address
-        'Los Angeles',           -- City
-        'CA',                    -- State
-        'USA',                   -- Country
-        90001                    -- Zip code
+        'Jane', 'Smith', 'jane.smith@example.com', 123456789, 'Password123', 'Attendee',
+        '456 Oak Ave', 'Los Angeles', 'CA', 'USA', 90001
     );
-    DBMS_OUTPUT.PUT_LINE('Test Case 2: User created - THIS SHOULD NOT DISPLAY');
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Test Case 2: Error creating user with invalid type (expected): ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
 END;
 /
 
--- Test Case 3: Test email uniqueness
+-- Test Case 3: User creation - Invalid email (no @ symbol)
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 3: Testing email uniqueness');
-    
-    -- Try to create another user with the same email
+    DBMS_OUTPUT.PUT_LINE('Test Case 3: User creation with invalid email (no @ symbol)');
     add_user_with_address(
-        'Duplicate',             -- First name
-        'Email',                 -- Last name
-        'john.doe@example.com',  -- Email (duplicate)
-        1117778888,              -- Phone number (unique)
-        'Password456',           -- Password
-        'Attendee',              -- User type
-        '200 Different St',      -- Street address
-        'Miami',                 -- City
-        'FL',                    -- State
-        'USA',                   -- Country
-        33101                    -- Zip code
+        'Bob', 'Brown', 'bob.brown.example.com', 9876543210, 'Password123', 'Attendee',
+        '789 Pine St', 'Chicago', 'IL', 'USA', 60601
     );
-    DBMS_OUTPUT.PUT_LINE('Test Case 3: User created - THIS SHOULD NOT DISPLAY');
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Test Case 3: Error creating user with duplicate email (expected): ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
 END;
 /
 
--- Test Case 4: Test phone number uniqueness
+-- Test Case 4: User creation - NULL phone
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 4: Testing phone number uniqueness');
-    
-    -- Try to create another user with the same phone
+    DBMS_OUTPUT.PUT_LINE('Test Case 4: User creation with NULL phone');
     add_user_with_address(
-        'Duplicate',                  -- First name
-        'Phone',                      -- Last name
-        'different.email@example.com',-- Email (unique)
-        1234567890,                   -- Phone number (duplicate)
-        'Password789',                -- Password
-        'Attendee',                   -- User type
-        '400 Different St',           -- Street address
-        'Dallas',                     -- City
-        'TX',                         -- State
-        'USA',                        -- Country
-        75201                         -- Zip code
+        'Alice', 'Green', 'alice.green@example.com', NULL, 'Password123', 'Attendee',
+        '321 Elm St', 'Boston', 'MA', 'USA', 02101
     );
-    DBMS_OUTPUT.PUT_LINE('Test Case 4: User created - THIS SHOULD NOT DISPLAY');
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Test Case 4: Error creating user with duplicate phone (expected): ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
 END;
 /
 
--- Test Case 5: Update user with valid information
+-- Test Case 5: User creation - NULL email
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 5: Update user with valid information');
-    
-    -- Get an existing user ID for testing
-    DECLARE
-        v_user_id NUMBER;
-        v_email VARCHAR2(250);
+    DBMS_OUTPUT.PUT_LINE('Test Case 5: User creation with NULL email');
+    add_user_with_address(
+        'Mark', 'White', NULL, 4567891230, 'Password123', 'Attendee',
+        '654 Maple Ave', 'Miami', 'FL', 'USA', 33101
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+END;
+/
+
+-- Test Case 6: User creation - Invalid user type
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 6: User creation with invalid user type');
+    add_user_with_address(
+        'Chris', 'Black', 'chris.black@example.com', 7891234560, 'Password123', 'Guest',
+        '987 Cedar Rd', 'Seattle', 'WA', 'USA', 98101
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+END;
+/
+
+-- Test Case 7: User creation - Duplicate email
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 7: User creation with duplicate email');
+    -- First create a user (if not already created in Test Case 1)
     BEGIN
-        -- Find a user to update
-        BEGIN
-            SELECT USER_ID, EMAIL INTO v_user_id, v_email
-            FROM EVENT_USERS
-            WHERE ROWNUM = 1;
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 5: Found user ID ' || v_user_id || ' with email ' || v_email);
-            
-            -- Update the user's name
-            update_user(
-                p_user_id => v_user_id,
-                p_first_name => 'Updated',
-                p_last_name => 'User'
-            );
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 5: Successfully updated user name');
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 5: No users found to update. Test skipped.');
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 5: Error: ' || SQLERRM);
-        END;
+        add_user_with_address(
+            'David', 'Lee', 'david.lee@example.com', 3216549870, 'Password123', 'Attendee',
+            '741 Birch Ave', 'Dallas', 'TX', 'USA', 75201
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL; -- Ignore errors, in case user already exists
+    END;
+    
+    -- Then try to create another with the same email
+    add_user_with_address(
+        'Emma', 'Clark', 'david.lee@example.com', 9876543210, 'Password456', 'Organizer',
+        '852 Aspen Dr', 'Houston', 'TX', 'USA', 77001
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+END;
+/
+
+-- Test Case 8: User creation - Duplicate phone
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 8: User creation with duplicate phone');
+    -- First create a user (if not already created)
+    BEGIN
+        add_user_with_address(
+            'Frank', 'Wilson', 'frank.wilson@example.com', 1472583690, 'Password123', 'Sponsor',
+            '963 Pine St', 'Phoenix', 'AZ', 'USA', 85001
+        );
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL; -- Ignore errors, in case user already exists
+    END;
+    
+    -- Then try to create another with the same phone
+    add_user_with_address(
+        'Grace', 'Taylor', 'grace.taylor@example.com', 1472583690, 'Password456', 'Venue_Manager',
+        '159 Oak St', 'San Diego', 'CA', 'USA', 92101
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+END;
+/
+
+-- Test Case 9: Create a user for update tests
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 9: Creating user for update tests');
+    BEGIN
+        add_user_with_address(
+            'Update', 'Test', 'update.test@example.com', 9876543210, 'Password123', 'Attendee',
+            '123 Update St', 'Chicago', 'IL', 'USA', 60601
+        );
+        DBMS_OUTPUT.PUT_LINE('Test user created successfully');
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Error creating test user (may already exist): ' || SQLERRM);
     END;
 END;
 /
 
--- Test Case 6: Update address with valid information
+-- Test Case 10: User update - Invalid phone (9 digits)
+DECLARE
+    v_user_id NUMBER;
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 6: Update address with valid information');
-    
-    DECLARE
-        v_user_id NUMBER;
-        v_address_id NUMBER;
+    DBMS_OUTPUT.PUT_LINE('Test Case 10: User update with invalid phone (9 digits)');
     BEGIN
-        -- Find a user and address for testing
-        BEGIN
-            SELECT UA.USER_USER_ID, UA.ADDRESS_ID 
-            INTO v_user_id, v_address_id
-            FROM USER_ADDRESS UA
-            WHERE ROWNUM = 1;
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 6: Found user ID ' || v_user_id || ' with address ID ' || v_address_id);
-            
-            -- Update the address
-            update_user_address(
-                p_address_id => v_address_id,
-                p_user_id => v_user_id,
-                p_street_address => '123 Updated Street',
-                p_city => 'New City'
-            );
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 6: Successfully updated address');
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 6: No addresses found to update. Test skipped.');
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 6: Error: ' || SQLERRM);
-        END;
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_phone_number => 123456789
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
     END;
 END;
 /
 
--- Test Case 7: Update with invalid user ID
+-- Test Case 11: User update - Invalid email (no @ symbol)
+DECLARE
+    v_user_id NUMBER;
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 7: Update with invalid user ID');
-    
-    DECLARE
-        v_address_id NUMBER;
+    DBMS_OUTPUT.PUT_LINE('Test Case 11: User update with invalid email (no @ symbol)');
     BEGIN
-        -- Find an address for testing
-        BEGIN
-            SELECT ADDRESS_ID INTO v_address_id
-            FROM USER_ADDRESS
-            WHERE ROWNUM = 1;
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 7: Found address ID ' || v_address_id);
-            
-            -- Try to update with invalid user ID
-            update_user_address(
-                p_address_id => v_address_id,
-                p_user_id => 999999,  -- Non-existent user ID
-                p_street_address => '456 Invalid User Street'
-            );
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 7: Update completed - THIS SHOULD NOT DISPLAY');
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 7: No addresses found to test. Test skipped.');
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 7: Error: ' || SQLERRM);
-        END;
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_email => 'invalid.email'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
     END;
 END;
 /
 
--- Test Case 8: Update non-existent address
+-- Test Case 12: User update - Non-existent user ID
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 8: Update non-existent address');
-    
-    DECLARE
-        v_user_id NUMBER;
+    DBMS_OUTPUT.PUT_LINE('Test Case 12: User update with non-existent user ID');
+    update_user(
+        p_user_id => 999999,
+        p_first_name => 'Nonexistent'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+END;
+/
+
+-- Test Case 13: Create another user for duplicate tests
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 13: Creating second user for duplicate tests');
     BEGIN
-        -- Find a user for testing
-        BEGIN
-            SELECT USER_ID INTO v_user_id
-            FROM EVENT_USERS
-            WHERE ROWNUM = 1;
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 8: Found user ID ' || v_user_id);
-            
-            -- Try to update non-existent address
-            update_user_address(
-                p_address_id => 999999,  -- Non-existent address ID
-                p_user_id => v_user_id,
-                p_street_address => '789 Nonexistent Address'
-            );
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 8: Update completed - THIS SHOULD NOT DISPLAY');
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 8: No users found to test. Test skipped.');
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 8: Error: ' || SQLERRM);
-        END;
+        add_user_with_address(
+            'Duplicate', 'Test', 'duplicate.test@example.com', 1122334455, 'Password123', 'Attendee',
+            '123 Duplicate St', 'Seattle', 'WA', 'USA', 98101
+        );
+        DBMS_OUTPUT.PUT_LINE('Second test user created successfully');
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Error creating second test user (may already exist): ' || SQLERRM);
     END;
 END;
 /
 
--- Test Case 9: Update address that doesn't belong to user
+-- Test Case 14: User update - Email already exists
+DECLARE
+    v_user_id NUMBER;
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('Test Case 9: Update address that doesn''t belong to user');
-    
-    DECLARE
-        v_user_id1 NUMBER;
-        v_user_id2 NUMBER;
-        v_address_id NUMBER;
+    DBMS_OUTPUT.PUT_LINE('Test Case 14: User update with email that already exists');
     BEGIN
-        -- Find two different users and an address belonging to the first user
-        BEGIN
-            -- First, get a user with an address
-            SELECT UA.USER_USER_ID, UA.ADDRESS_ID 
-            INTO v_user_id1, v_address_id
-            FROM USER_ADDRESS UA
-            WHERE ROWNUM = 1;
-            
-            -- Then, get a different user
-            SELECT USER_ID INTO v_user_id2
-            FROM EVENT_USERS
-            WHERE USER_ID != v_user_id1 AND ROWNUM = 1;
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 9: Found user1 ID ' || v_user_id1 || 
-                               ', user2 ID ' || v_user_id2 || 
-                               ', address ID ' || v_address_id);
-            
-            -- Try to update user1's address using user2's ID
-            update_user_address(
-                p_address_id => v_address_id,
-                p_user_id => v_user_id2,
-                p_street_address => '999 Wrong Owner Street'
-            );
-            
-            DBMS_OUTPUT.PUT_LINE('Test Case 9: Update completed - THIS SHOULD NOT DISPLAY');
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 9: Not enough users/addresses found to test. Test skipped.');
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('Test Case 9: Error: ' || SQLERRM);
-        END;
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_email => 'duplicate.test@example.com'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 15: User update - Phone already exists
+DECLARE
+    v_user_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 15: User update with phone that already exists');
+    BEGIN
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_phone_number => 1122334455
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 16: User update - Invalid user type
+DECLARE
+    v_user_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 16: User update with invalid user type');
+    BEGIN
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_user_type => 'Guest'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 17: User update - Valid update (all fields)
+DECLARE
+    v_user_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 17: Valid user update (all fields)');
+    BEGIN
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'update.test@example.com';
+        
+        update_user(
+            p_user_id => v_user_id,
+            p_first_name => 'Updated',
+            p_last_name => 'User',
+            p_email => 'updated.user@example.com',
+            p_phone_number => 5556667777,
+            p_user_password => 'NewPassword789',
+            p_user_type => 'Organizer'
+        );
+        
+        -- Verify the update
+        FOR rec IN (SELECT FIRST_NAME, LAST_NAME, EMAIL, PHONE_NUMBER, USER_TYPE
+                    FROM EVENT_USERS 
+                    WHERE USER_ID = v_user_id) 
+        LOOP
+            DBMS_OUTPUT.PUT_LINE('Updated user info:');
+            DBMS_OUTPUT.PUT_LINE('Name: ' || rec.FIRST_NAME || ' ' || rec.LAST_NAME);
+            DBMS_OUTPUT.PUT_LINE('Email: ' || rec.EMAIL);
+            DBMS_OUTPUT.PUT_LINE('Phone: ' || rec.PHONE_NUMBER);
+            DBMS_OUTPUT.PUT_LINE('Type: ' || rec.USER_TYPE);
+        END LOOP;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Unexpected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 18: Address update - Non-existent address
+DECLARE
+    v_user_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 18: Address update with non-existent address ID');
+    BEGIN
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'updated.user@example.com';
+        
+        update_user_address(
+            p_address_id => 999999,
+            p_user_id => v_user_id,
+            p_street_address => '456 Nonexistent St'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 19: Address update - Non-existent user
+DECLARE
+    v_address_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 19: Address update with non-existent user');
+    BEGIN
+        SELECT ADDRESS_ID INTO v_address_id
+        FROM USER_ADDRESS
+        WHERE ROWNUM = 1;
+        
+        update_user_address(
+            p_address_id => v_address_id,
+            p_user_id => 999999,
+            p_street_address => '456 Invalid User St'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('No addresses found in the database');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 20: Address update - Address not owned by user
+DECLARE
+    v_user_id1 NUMBER;
+    v_user_id2 NUMBER;
+    v_address_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 20: Address update with address not owned by user');
+    BEGIN
+        -- Get user 1 and their address
+        SELECT USER_ID INTO v_user_id1
+        FROM EVENT_USERS
+        WHERE EMAIL = 'updated.user@example.com';
+        
+        SELECT ADDRESS_ID INTO v_address_id
+        FROM USER_ADDRESS
+        WHERE USER_USER_ID = v_user_id1 AND ROWNUM = 1;
+        
+        -- Get user 2
+        SELECT USER_ID INTO v_user_id2
+        FROM EVENT_USERS
+        WHERE EMAIL = 'duplicate.test@example.com';
+        
+        -- Try to update user1's address using user2's ID
+        update_user_address(
+            p_address_id => v_address_id,
+            p_user_id => v_user_id2,
+            p_street_address => '789 Wrong Owner St'
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test users or address not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Expected error: ' || SQLERRM);
+    END;
+END;
+/
+
+-- Test Case 21: Address update - Valid update
+DECLARE
+    v_user_id NUMBER;
+    v_address_id NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Test Case 21: Valid address update');
+    BEGIN
+        SELECT USER_ID INTO v_user_id
+        FROM EVENT_USERS
+        WHERE EMAIL = 'updated.user@example.com';
+        
+        SELECT ADDRESS_ID INTO v_address_id
+        FROM USER_ADDRESS
+        WHERE USER_USER_ID = v_user_id AND ROWNUM = 1;
+        
+        update_user_address(
+            p_address_id => v_address_id,
+            p_user_id => v_user_id,
+            p_street_address => '123 New Address',
+            p_city => 'New City',
+            p_state => 'NC',
+            p_country => 'USA',
+            p_zip_code => 20001
+        );
+        
+        -- Verify the update
+        FOR rec IN (SELECT STREET_ADDRESS, CITY, STATE, COUNTRY, ZIP_CODE
+                    FROM USER_ADDRESS 
+                    WHERE ADDRESS_ID = v_address_id) 
+        LOOP
+            DBMS_OUTPUT.PUT_LINE('Updated address info:');
+            DBMS_OUTPUT.PUT_LINE('Street: ' || rec.STREET_ADDRESS);
+            DBMS_OUTPUT.PUT_LINE('City: ' || rec.CITY);
+            DBMS_OUTPUT.PUT_LINE('State: ' || rec.STATE);
+            DBMS_OUTPUT.PUT_LINE('Country: ' || rec.COUNTRY);
+            DBMS_OUTPUT.PUT_LINE('Zip: ' || rec.ZIP_CODE);
+        END LOOP;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Test user or address not found');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Unexpected error: ' || SQLERRM);
     END;
 END;
 /
