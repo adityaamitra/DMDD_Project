@@ -58,6 +58,28 @@ BEGIN
 END;
 /
 
+-- Create EVENT_ID_SEQ sequence with error handling
+DECLARE
+  seq_exists NUMBER;
+BEGIN
+  -- Check if EVENT_ID_SEQ exists
+  SELECT COUNT(*) INTO seq_exists
+  FROM USER_SEQUENCES
+  WHERE SEQUENCE_NAME = 'EVENT_ID_SEQ';
+  
+  IF seq_exists = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE EVENT_ADMIN.EVENT_ID_SEQ
+                      START WITH 1001
+                      INCREMENT BY 1
+                      NOCACHE
+                      NOCYCLE';
+    DBMS_OUTPUT.PUT_LINE('EVENT_ID_SEQ created successfully.');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('EVENT_ID_SEQ already exists. Skipping creation.');
+  END IF;
+END;
+/
+
 CREATE OR REPLACE TRIGGER after_insert_event_users
 AFTER INSERT ON EVENT_USERS
 FOR EACH ROW
@@ -193,6 +215,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('User ' || :NEW.USER_ID || ' of type ' || :NEW.USER_TYPE || ' added to respective table.');
 END;
 /
+
 
 
 
