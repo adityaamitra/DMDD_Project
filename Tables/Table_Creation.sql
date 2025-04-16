@@ -446,7 +446,7 @@ ALTER TABLE EVENT
 ADD CONSTRAINT chk_event_name_not_blank CHECK (TRIM(EVENT_NAME) IS NOT NULL AND EVENT_NAME <> '');
 
 ALTER TABLE EVENT
-ADD CONSTRAINT chk_event_status_valid CHECK (STATUS IN ('Scheduled', 'Completed', 'Cancelled', 'Pending'));
+ADD CONSTRAINT chk_event_status_valid CHECK (STATUS IN ('Scheduled', 'Completed', 'Cancelled', 'Pending', 'Requested'));
 
 ALTER TABLE EVENT
 ADD CONSTRAINT chk_event_budget_positive CHECK (EVENT_BUDGET IS NULL OR EVENT_BUDGET > 0);

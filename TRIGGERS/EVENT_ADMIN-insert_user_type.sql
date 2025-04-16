@@ -80,6 +80,27 @@ BEGIN
 END;
 /
 
+-- Query to check and create EVENT_SCHEDULE_SEQ
+DECLARE
+  seq_exists NUMBER;
+BEGIN
+  -- Check if EVENT_SCHEDULE_SEQ exists
+  SELECT COUNT(*) INTO seq_exists 
+  FROM USER_SEQUENCES 
+  WHERE SEQUENCE_NAME = 'EVENT_SCHEDULE_SEQ';
+  IF seq_exists = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE EVENT_ADMIN.EVENT_SCHEDULE_SEQ 
+                      START WITH 1001 
+                      INCREMENT BY 1 
+                      NOCACHE 
+                      NOCYCLE';
+    DBMS_OUTPUT.PUT_LINE('EVENT_SCHEDULE_SEQ created successfully.');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('EVENT_SCHEDULE_SEQ already exists. Skipping creation.');
+  END IF;
+END;
+/
+
 CREATE OR REPLACE TRIGGER after_insert_event_users
 AFTER INSERT ON EVENT_USERS
 FOR EACH ROW
