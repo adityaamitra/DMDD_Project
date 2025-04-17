@@ -1,97 +1,128 @@
-Project Setup Instructions
-Step 1: User Creation
-1.	Open the Setup folder from the main branch.
-2.	Run the UserCreation.sql file using the ADMIN user.
-o	This will create the following users:
-	EVENT_ADMIN
-	EVENT_ORGANIZER
-	EVENT_SPONSOR
-	EVENT_ATTENDEE
-	EVENT_VIEWER
-	VENUE_MANAGER
-o	The EVENT_ADMIN user will be granted admin rights.
-Step 2: Table Creation
-1.	Open the Table folder in the main branch.
-2.	Run the Table_Creation.sql file using the EVENT_ADMIN user.
-o	This will create all the necessary tables.
-Step 3: Grant Permissions
-1.	Open the Permission folder in the main branch.
-2.	Run the Permission_granted.sql file using the EVENT_ADMIN user.
-o	This will grant the required permissions.
-Step 4: Insert Dummy Data
-1.	Open the Dummy_input_data folder.
-2.	Run the input_data.sql file using the EVENT_ADMIN user.
-o	This will feed dummy data into all the tables.
-Step 5: Create Views
-1.	Open the Views folder from the main branch.
-2.	Run the views.sql file.
-o	This will create the following views:
-	Seat Availability
-	Total Ticket Sales
-	Organizer Revenue
-Step 6: Check Views
-To check the views, run the following SQL queries:
-SELECT * FROM SEAT_AVAILABILITY;
-SELECT * FROM EVENT_TICKET_SALES;
-SELECT * FROM ORGANIZER_REVENUE;
-User Passwords
-•	Passwords for each user are provided in the EVENT_ADMIN file.
+# Event Management System - Database Project
 
- 
-Business Rules:
+## Overview
 
-1.	An organizer can manage multiple events, but each event is managed by one organizer.
-2.	Attendees can register for multiple events.
-3.	Payments are linked to registrations, and a registration can have only one payment.
-4.	Events can have multiple sponsors, but a sponsor can sponsor only events they are associated with.
-5.	Event schedules are tied to venues, with one schedule per venue at a given time.
-6.	Each registration can receive feedback once, and feedback is linked to the registration.
-7.	Ticket prices are event-specific, and registration status must be maintained.
-8.	Each user must have a email and phone number.
+This project implements a comprehensive event management system database with role-based access control. The system enables various users (admins, organizers, sponsors, attendees, and venue managers) to interact with the database based on their specific roles and permissions.
 
-Normalization Process:
-1st Normal Form (1NF)
-•	Ensured all columns contain atomic data (no repeating groups).
-•	Separate tables for entities like User, Organizer, Attendee, Venue, Event, Sponsor, Registration, Payment, Event Review, and Event Schedule.
-2nd Normal Form (2NF)
-•	Ensured no partial dependency by creating separate tables for dependent data.
-•	Event Reviews are linked to both Registration and Event, removing redundancy.
-•	Sponsor table has a composite primary key with Sponsor_ID and Event_ID to ensure proper relationships.
-3rd Normal Form (3NF)
-•	Removed transitive dependencies by creating new tables where necessary.
-•	Address data is separated into its own table, linked to User by USER_ID.
-•	Payment table stores payment information directly related to the registration, avoiding redundancy.
-Boyce-Codd Normal Form (BCNF)
-•	Ensured all determinants are candidate keys.
-•	Any anomalies in the Sponsor and Event tables were resolved.
- 
-Validations and Constraints
-User Constraints:
-o	Email, First Name, and Last Name cannot be blank.
-o	Phone Number must be NOT NULL and numeric.
-o	User Type should be one of: 'Attendee', 'Organizer', ‘Venue_Manager’, or 'Sponsor'.
-Event Constraints:
-o	Event Name cannot be blank.
-o	Status must be either 'Scheduled', 'Completed', or 'Cancelled'.
-o	Event Budget must be greater than zero.
-Registration Constraints:
-o	Ticket Quantity cannot be zero or negative.
-o	Ticket Price should be greater than zero.
-o	Status should be one of: 'Confirmed', 'Pending', or 'Cancelled'.
-Payment Constraints:
-o	Payment Amount should be greater than zero.
-o	Payment Status must be one of: 'Paid', 'Pending', or 'Failed'.
-Event Review Constraints:
-o	Ratings must be between 1 and 5.
-o	Review text should not exceed 250 characters.
-Venue Constraints:
-o	Venue Capacity must be greater than zero.
-o	Venue Name cannot be empty.
-Sponsor Constraints:
-o	Amount Sponsored must be a positive number.
-General Rules:
-o	Auto registration when a product's quantity on hand falls below the threshold value (for events with limited seats).
-o	Discount is applied before tax calculation, not after.
-o	No further discount or promotion on perishable or non-eligible event categories.
+## Project Structure
 
+The repository is organized into the following key components:
 
+- **SETUP**: Contains scripts for creating user accounts and roles
+- **Tables**: Contains SQL scripts for creating database tables
+- **Permissions**: Contains scripts for granting appropriate permissions to users
+- **Dummy_input_data**: Contains scripts for populating tables with sample data
+- **Views**: Contains SQL views for common data access patterns
+- **FUNCTIONS**: Contains database functions for specific operations
+- **STORED_PROCEDURES**: Contains stored procedures for complex operations
+- **TRIGGERS**: Contains database triggers for data integrity and automation
+- **SEQUENCES**: Contains sequences for all necessary tables
+- **REPORTS**: Contains Analytical Reports
+
+## Prerequisites
+
+- Oracle Database (compatible with Oracle SQL syntax)
+- Oracle SQL Developer or similar database management tool
+- Administrative access to create users and manage permissions
+
+## Installation and Setup
+
+### Step 1: User Creation
+
+1. Connect to your Oracle database as the ADMIN user
+2. Navigate to the **SETUP** folder in the project
+3. Execute the `UserCreation.sql` script using the ADMIN account
+
+This will create the following user accounts:
+- EVENT_ADMIN (administrator role)
+- EVENT_ORGANIZER
+- EVENT_SPONSOR
+- EVENT_ATTENDEE
+- EVENT_VIEWER
+- VENUE_MANAGER
+
+### Step 2: Database Schema Creation
+
+1. Connect to your Oracle database as the EVENT_ADMIN user
+2. Navigate to the **Tables** folder
+3. Execute the `Table_Creation.sql` script
+
+This will create all the necessary tables for the event management system.
+
+### Step 3: Grant Permissions
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **Permissions** folder
+3. Execute the `Permission_granted.sql` script
+
+This will grant the appropriate permissions to all user roles.
+
+### Step 4: Create Sequences
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to **Sequences** folder
+3. Execute the `EVENT_ADMIN-Sequences.sql` script
+
+### Step 5: Implement Functions
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **FUNCTIONS** folder
+3. Execute all SQL scripts in this folder
+
+This will create specialized functions such as:
+- User contact validation
+- Seat availability checking
+
+### Step 6: Implement Triggers
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **TRIGGERS** folder
+3. Execute `EVENT_ADMIN-insert_user_type.sql` script
+
+This will implement triggers for data integrity and automated operations.
+
+### Step 7: Implement Stored Procedures
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **STORED_PROCEDURES** folder
+3. Execute the following scripts in order:
+   - `EVENT ADMIN - User Operations.sql`
+   - `ORGANIZER-Create Event.sql`
+   - `ORGANIZER-Event Request.sql`
+   - `ORGANIZER-Update Event.sql`
+   - `VENUE_MANAGER-Create_Venue.sql`
+   - `VENUE_MANAGER-Event Requests.sql`
+   - `EVENT_SPONSOR-Add_Sponsorship.sql`
+   - `EVENT_ATTENDEE-Register for Events.sql`
+   - `EVENT_ATTENDEE-Update_Registration.sql`
+   - `EVENT_ATTENDEE-add_feedback.sql`
+
+### Step 8: Populate with Sample Data
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **Dummy_input_data** folder
+3. Execute the `input_data.sql` script
+
+This will populate the database with sample data for testing purposes.
+
+### Step 9: Create Views
+
+1. Remain connected as the EVENT_ADMIN user
+2. Navigate to the **Views** folder
+3. Execute the `Views.sql` script
+
+This will create the following views:
+- REPORT_EVENT_PROFIT_LOSS
+- REPORT_ORGANIZER_PERFORMANCE
+- VIEW_SPONSOR_ANALYSIS
+- VIEW_ATTENDEE_EVENT_HISTORY
+- VIEW_VENUE_ANALYSIS
+
+### Step 10: Create Reports
+
+Execute the following report scripts:
+- `REPORT_1_Revenue.sql`
+- `REPORT_2_FEEDBACK.sql`
+- `REPORT_3_SPONSOR.sql`
+- `REPORT_4_ATTENDEE.sql`
+- `REPORT_5_VENUE.sql`
