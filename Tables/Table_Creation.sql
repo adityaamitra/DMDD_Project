@@ -464,7 +464,7 @@ ALTER TABLE PAYMENT
 ADD CONSTRAINT chk_payment_amount_positive CHECK (AMOUNT > 0);
 
 ALTER TABLE PAYMENT
-ADD CONSTRAINT chk_payment_status_valid CHECK (PAYMENT_STATUS IN ('Completed', 'Pending', 'Failed'));
+ADD CONSTRAINT chk_payment_status_valid CHECK (PAYMENT_STATUS IN ('Completed', 'Pending', 'Failed', 'Refunded'));
 
 ALTER TABLE EVENT_REVIEW
 ADD CONSTRAINT chk_event_review_rating_range CHECK (RATING BETWEEN 1 AND 5);
