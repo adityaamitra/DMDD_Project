@@ -81,6 +81,45 @@ END;
 /
 
 
+-- First create the REGISTRATION_SEQ if it doesn't exist
+DECLARE
+  seq_exists NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO seq_exists FROM USER_SEQUENCES 
+  WHERE SEQUENCE_NAME = 'REGISTRATION_SEQ';
+  IF seq_exists = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE EVENT_ADMIN.REGISTRATION_SEQ 
+                      START WITH 1001 
+                      INCREMENT BY 1 
+                      NOCACHE 
+                      NOCYCLE';
+    DBMS_OUTPUT.PUT_LINE('REGISTRATION_SEQ created successfully.');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('REGISTRATION_SEQ already exists.');
+  END IF;
+END;
+/
+
+
+-- First create the PAYMENT_ID_SEQ if it doesn't exist
+DECLARE
+  seq_exists NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO seq_exists FROM USER_SEQUENCES 
+  WHERE SEQUENCE_NAME = 'PAYMENT_ID_SEQ';
+  IF seq_exists = 0 THEN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE EVENT_ADMIN.PAYMENT_ID_SEQ 
+                      START WITH 1001 
+                      INCREMENT BY 1 
+                      NOCACHE 
+                      NOCYCLE';
+    DBMS_OUTPUT.PUT_LINE('PAYMENT_ID_SEQ created successfully.');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('PAYMENT_ID_SEQ already exists.');
+  END IF;
+END;
+/
+
 -- Query to check and create EVENT_SCHEDULE_SEQ
 DECLARE
   seq_exists NUMBER;
