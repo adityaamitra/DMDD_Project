@@ -1,4 +1,3 @@
--- Procedure to register an attendee for an event with payment processing
 CREATE OR REPLACE PROCEDURE register_for_event(
     p_event_id IN NUMBER,
     p_attendee_id IN NUMBER,
@@ -231,7 +230,6 @@ END register_for_event;
 -- Test cases for the register_for_event procedure
 SET SERVEROUTPUT ON;
 
--- TEST CASE 1: Valid registration with successful payment
 DECLARE
     v_event_id NUMBER := 1;       -- Tech Conference
     v_attendee_id NUMBER := 1;    -- An existing attendee
